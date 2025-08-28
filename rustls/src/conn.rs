@@ -358,6 +358,22 @@ https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof"
 #[cfg(feature = "std")]
 pub use connection::{Connection, Reader, Writer};
 
+/// This trait is for any object that can export keying material.
+///
+/// There are several such internal implementations, depending on the context
+/// and protocol version.
+pub(crate) trait BytesExporter: Send + Sync {
+    /// Fills in `output` with keying material.
+    ///
+    /// Must fill in `output` entirely, or return an error.
+    fn export_keying_material(
+        &self,
+        output: &mut [u8],
+        label: &[u8],
+        context: Option<&[u8]>,
+    ) -> Result<(), Error>;
+}
+
 #[derive(Debug)]
 pub(crate) struct ConnectionRandoms {
     pub(crate) client: [u8; 32],
