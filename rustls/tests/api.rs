@@ -3539,23 +3539,29 @@ fn do_exporter_test(client_config: ClientConfig, server_config: ServerConfig) {
 
     let (mut client, mut server) = make_pair_for_configs(client_config, server_config);
 
-    assert_eq!(
-        Err(Error::HandshakeNotComplete),
-        client.export_keying_material(&mut client_secret, b"label", Some(b"context"))
-    );
-    assert_eq!(
-        Err(Error::HandshakeNotComplete),
-        server.export_keying_material(&mut server_secret, b"label", Some(b"context"))
-    );
+    assert_eq!(Some(Error::HandshakeNotComplete), client.exporter().err());
+    assert_eq!(Some(Error::HandshakeNotComplete), server.exporter().err());
     do_handshake(&mut client, &mut server);
 
+    let client_exporter = client.exporter().unwrap();
+    let server_exporter = server.exporter().unwrap();
+
+    assert_eq!(
+        Some(Error::General("exporter already used".into())),
+        client.exporter().err()
+    );
+    assert_eq!(
+        Some(Error::General("exporter already used".into())),
+        server.exporter().err()
+    );
+
     assert!(
-        client
+        client_exporter
             .export_keying_material(&mut client_secret, b"label", Some(b"context"))
             .is_ok()
     );
     assert!(
-        server
+        server_exporter
             .export_keying_material(&mut server_secret, b"label", Some(b"context"))
             .is_ok()
     );
@@ -3563,7 +3569,7 @@ fn do_exporter_test(client_config: ClientConfig, server_config: ServerConfig) {
 
     let mut empty = vec![];
     assert_eq!(
-        client
+        client_exporter
             .export_keying_material(&mut empty, b"label", Some(b"context"))
             .err(),
         Some(Error::General(
@@ -3571,7 +3577,7 @@ fn do_exporter_test(client_config: ClientConfig, server_config: ServerConfig) {
         ))
     );
     assert_eq!(
-        server
+        server_exporter
             .export_keying_material(&mut empty, b"label", Some(b"context"))
             .err(),
         Some(Error::General(
@@ -3580,13 +3586,13 @@ fn do_exporter_test(client_config: ClientConfig, server_config: ServerConfig) {
     );
 
     assert!(
-        client
+        client_exporter
             .export_keying_material(&mut client_secret, b"label", None)
             .is_ok()
     );
     assert_ne!(client_secret.to_vec(), server_secret.to_vec());
     assert!(
-        server
+        server_exporter
             .export_keying_material(&mut server_secret, b"label", None)
             .is_ok()
     );
@@ -3629,16 +3635,20 @@ fn test_tls13_exporter_maximum_output_length() {
         Some(find_suite(CipherSuite::TLS13_AES_256_GCM_SHA384))
     );
 
+    let client_exporter = client.exporter().unwrap();
+    let server_exporter = server.exporter().unwrap();
+
     let mut maximum_allowed_output_client = [0u8; 255 * 48];
     let mut maximum_allowed_output_server = [0u8; 255 * 48];
-    client
+
+    client_exporter
         .export_keying_material(
             &mut maximum_allowed_output_client,
             b"label",
             Some(b"context"),
         )
         .unwrap();
-    server
+    server_exporter
         .export_keying_material(
             &mut maximum_allowed_output_server,
             b"label",
@@ -3650,13 +3660,13 @@ fn test_tls13_exporter_maximum_output_length() {
 
     let mut too_long_output = [0u8; 255 * 48 + 1];
     assert_eq!(
-        client
+        client_exporter
             .export_keying_material(&mut too_long_output, b"label", Some(b"context"),)
             .err(),
         Some(Error::General("exporting too much".into()))
     );
     assert_eq!(
-        server
+        server_exporter
             .export_keying_material(&mut too_long_output, b"label", Some(b"context"),)
             .err(),
         Some(Error::General("exporting too much".into()))

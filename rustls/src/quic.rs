@@ -26,7 +26,7 @@ mod connection {
     use super::{DirectionalKeys, KeyChange, Version};
     use crate::client::{ClientConfig, ClientConnectionData};
     use crate::common_state::{CommonState, DEFAULT_BUFFER_LIMIT, Protocol};
-    use crate::conn::{ConnectionCore, SideData};
+    use crate::conn::{ConnectionCore, KeyingMaterialExporter, SideData};
     use crate::enums::{AlertDescription, ContentType, ProtocolVersion};
     use crate::error::Error;
     use crate::msgs::base::Payload;
@@ -98,35 +98,17 @@ mod connection {
             }
         }
 
-        /// Derives key material from the agreed connection secrets.
+        /// Returns an object that can derive key material from the agreed connection secrets.
         ///
-        /// This function fills in `output` with `output.len()` bytes of key
-        /// material derived from the master session secret using `label`
-        /// and `context` for diversification. Ownership of the buffer is taken
-        /// by the function and returned via the Ok result to ensure no key
-        /// material leaks if the function fails.
+        /// This function can be called at most once per connection, it returns
+        /// an error on subsequent calls.
         ///
-        /// See RFC5705 for more details on what this does and is for.
-        ///
-        /// For TLS1.3 connections, this function does not use the
-        /// "early" exporter at any point.
-        ///
-        /// This function fails if called prior to the handshake completing;
+        /// This function returns an error if called prior to the handshake completing;
         /// check with [`CommonState::is_handshaking`] first.
-        #[inline]
-        pub fn export_keying_material<T: AsMut<[u8]>>(
-            &self,
-            output: T,
-            label: &[u8],
-            context: Option<&[u8]>,
-        ) -> Result<T, Error> {
+        pub fn exporter(&mut self) -> Result<KeyingMaterialExporter, Error> {
             match self {
-                Self::Client(conn) => conn
-                    .core
-                    .export_keying_material(output, label, context),
-                Self::Server(conn) => conn
-                    .core
-                    .export_keying_material(output, label, context),
+                Self::Client(conn) => conn.core.exporter(),
+                Self::Server(conn) => conn.core.exporter(),
             }
         }
     }
