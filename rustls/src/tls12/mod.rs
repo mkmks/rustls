@@ -3,7 +3,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt;
 
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
 use crate::common_state::{CommonState, Side};
 use crate::conn::ConnectionRandoms;
@@ -109,7 +109,7 @@ impl fmt::Debug for Tls12CipherSuite {
 pub(crate) struct ConnectionSecrets {
     pub(crate) randoms: ConnectionRandoms,
     suite: &'static Tls12CipherSuite,
-    master_secret: [u8; 48],
+    master_secret: Zeroizing<[u8; 48]>,
     master_secret_prf: Box<dyn crypto::tls12::PrfSecret>,
 }
 
@@ -141,6 +141,7 @@ impl ConnectionSecrets {
             label.as_bytes(),
             seed.as_ref(),
         )?;
+        let master_secret = Zeroizing::new(master_secret);
 
         let master_secret_prf = suite
             .prf_provider
@@ -162,7 +163,7 @@ impl ConnectionSecrets {
         Self {
             randoms,
             suite,
-            master_secret: *master_secret,
+            master_secret: Zeroizing::new(*master_secret),
             master_secret_prf: suite
                 .prf_provider
                 .new_secret(master_secret),
@@ -291,12 +292,6 @@ impl ConnectionSecrets {
             Side::Server => (server_secrets, client_secrets),
         };
         Ok(PartiallyExtractedSecrets { tx, rx })
-    }
-}
-
-impl Drop for ConnectionSecrets {
-    fn drop(&mut self) {
-        self.master_secret.zeroize();
     }
 }
 
