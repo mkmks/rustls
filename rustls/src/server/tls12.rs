@@ -948,7 +948,17 @@ impl State<ServerConnectionData> for ExpectFinished {
 
         cx.common
             .start_traffic(&mut cx.sendable_plaintext);
+
+        let extracted_secrets = match self.config.enable_secret_extraction {
+            true => Some(
+                self.secrets
+                    .extract_secrets(Side::Server),
+            ),
+            false => None,
+        };
+
         Ok(Box::new(ExpectTraffic {
+            extracted_secrets,
             secrets: self.secrets,
             _fin_verified,
         }))
@@ -961,6 +971,8 @@ impl State<ServerConnectionData> for ExpectFinished {
 
 // --- Process traffic ---
 struct ExpectTraffic {
+    // only available if `config.enable_secret_extraction` is true
+    extracted_secrets: Option<Result<PartiallyExtractedSecrets, Error>>,
     secrets: ConnectionSecrets,
     _fin_verified: verify::FinishedMessageVerified,
 }
@@ -1002,13 +1014,13 @@ impl State<ServerConnectionData> for ExpectTraffic {
     }
 
     fn into_external_state(
-        self: Box<Self>,
+        mut self: Box<Self>,
     ) -> Result<(PartiallyExtractedSecrets, Box<dyn KernelState + 'static>), Error> {
-        Ok((
-            self.secrets
-                .extract_secrets(Side::Server)?,
-            self,
-        ))
+        let extracted_secrets = self
+            .extracted_secrets
+            .take()
+            .expect("into_external_state() => enable_secret_extraction")?;
+        Ok((extracted_secrets, self))
     }
 
     fn into_owned(self: Box<Self>) -> hs::NextState<'static> {
