@@ -13,8 +13,8 @@ use crate::check::{inappropriate_handshake_message, inappropriate_message};
 use crate::common_state::{
     CommonState, HandshakeFlightTls13, HandshakeKind, Protocol, Side, State,
 };
-use crate::conn::ConnectionRandoms;
 use crate::conn::kernel::{Direction, KernelContext, KernelState};
+use crate::conn::{BytesExporter, ConnectionRandoms};
 use crate::enums::{AlertDescription, ContentType, HandshakeType, ProtocolVersion};
 use crate::error::{Error, InvalidMessage, PeerIncompatible, PeerMisbehaved};
 use crate::hash_hs::HandshakeHash;
@@ -31,7 +31,8 @@ use crate::server::ServerConfig;
 use crate::suites::PartiallyExtractedSecrets;
 use crate::sync::Arc;
 use crate::tls13::key_schedule::{
-    KeyScheduleResumption, KeyScheduleTraffic, KeyScheduleTrafficWithClientFinishedPending,
+    KeyScheduleExporter, KeyScheduleResumption, KeyScheduleTraffic,
+    KeyScheduleTrafficWithClientFinishedPending,
 };
 use crate::tls13::{
     Tls13CipherSuite, construct_client_verify_message, construct_server_verify_message,
@@ -1380,7 +1381,7 @@ impl State<ServerConnectionData> for ExpectFinished {
 
         cx.common.check_aligned_handshake()?;
 
-        let (key_schedule_traffic, resumption) =
+        let (key_schedule_traffic, exporter, resumption) =
             key_schedule_before_finished.into_traffic(self.transcript.current_hash());
 
         let mut flight = HandshakeFlightTls13::new(&mut self.transcript);
@@ -1395,11 +1396,12 @@ impl State<ServerConnectionData> for ExpectFinished {
 
         Ok(match cx.common.is_quic() {
             true => Box::new(ExpectQuicTraffic {
-                key_schedule: key_schedule_traffic,
+                exporter,
                 _fin_verified: fin,
             }),
             false => Box::new(ExpectTraffic {
                 key_schedule: key_schedule_traffic,
+                exporter,
                 _fin_verified: fin,
             }),
         })
@@ -1413,6 +1415,7 @@ impl State<ServerConnectionData> for ExpectFinished {
 // --- Process traffic ---
 struct ExpectTraffic {
     key_schedule: KeyScheduleTraffic,
+    exporter: KeyScheduleExporter,
     _fin_verified: verify::FinishedMessageVerified,
 }
 
@@ -1478,7 +1481,7 @@ impl State<ServerConnectionData> for ExpectTraffic {
         label: &[u8],
         context: Option<&[u8]>,
     ) -> Result<(), Error> {
-        self.key_schedule
+        self.exporter
             .export_keying_material(output, label, context)
     }
 
@@ -1523,7 +1526,7 @@ impl KernelState for ExpectTraffic {
 }
 
 struct ExpectQuicTraffic {
-    key_schedule: KeyScheduleTraffic,
+    exporter: KeyScheduleExporter,
     _fin_verified: verify::FinishedMessageVerified,
 }
 
@@ -1546,7 +1549,7 @@ impl State<ServerConnectionData> for ExpectQuicTraffic {
         label: &[u8],
         context: Option<&[u8]>,
     ) -> Result<(), Error> {
-        self.key_schedule
+        self.exporter
             .export_keying_material(output, label, context)
     }
 
