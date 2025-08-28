@@ -13,8 +13,8 @@ use crate::check::{inappropriate_handshake_message, inappropriate_message};
 use crate::common_state::{
     CommonState, HandshakeFlightTls13, HandshakeKind, Protocol, Side, State,
 };
+use crate::conn::ConnectionRandoms;
 use crate::conn::kernel::{Direction, KernelContext, KernelState};
-use crate::conn::{BytesExporter, ConnectionRandoms};
 use crate::enums::{AlertDescription, ContentType, HandshakeType, ProtocolVersion};
 use crate::error::{Error, InvalidMessage, PeerIncompatible, PeerMisbehaved};
 use crate::hash_hs::HandshakeHash;
@@ -31,8 +31,7 @@ use crate::server::ServerConfig;
 use crate::suites::PartiallyExtractedSecrets;
 use crate::sync::Arc;
 use crate::tls13::key_schedule::{
-    KeyScheduleExporter, KeyScheduleResumption, KeyScheduleTraffic,
-    KeyScheduleTrafficWithClientFinishedPending,
+    KeyScheduleResumption, KeyScheduleTraffic, KeyScheduleTrafficWithClientFinishedPending,
 };
 use crate::tls13::{
     Tls13CipherSuite, construct_client_verify_message, construct_server_verify_message,
@@ -1393,15 +1392,12 @@ impl State<ServerConnectionData> for ExpectFinished {
         // Application data may now flow, even if we have client auth enabled.
         cx.common
             .start_traffic(&mut cx.sendable_plaintext);
+        cx.common.exporter = Some(Box::new(exporter));
 
         Ok(match cx.common.is_quic() {
-            true => Box::new(ExpectQuicTraffic {
-                exporter,
-                _fin_verified: fin,
-            }),
+            true => Box::new(ExpectQuicTraffic { _fin_verified: fin }),
             false => Box::new(ExpectTraffic {
                 key_schedule: key_schedule_traffic,
-                exporter,
                 _fin_verified: fin,
             }),
         })
@@ -1415,7 +1411,6 @@ impl State<ServerConnectionData> for ExpectFinished {
 // --- Process traffic ---
 struct ExpectTraffic {
     key_schedule: KeyScheduleTraffic,
-    exporter: KeyScheduleExporter,
     _fin_verified: verify::FinishedMessageVerified,
 }
 
@@ -1475,16 +1470,6 @@ impl State<ServerConnectionData> for ExpectTraffic {
         Ok(self)
     }
 
-    fn export_keying_material(
-        &self,
-        output: &mut [u8],
-        label: &[u8],
-        context: Option<&[u8]>,
-    ) -> Result<(), Error> {
-        self.exporter
-            .export_keying_material(output, label, context)
-    }
-
     fn send_key_update_request(&mut self, common: &mut CommonState) -> Result<(), Error> {
         self.key_schedule
             .request_key_update_and_update_encrypter(common)
@@ -1526,7 +1511,6 @@ impl KernelState for ExpectTraffic {
 }
 
 struct ExpectQuicTraffic {
-    exporter: KeyScheduleExporter,
     _fin_verified: verify::FinishedMessageVerified,
 }
 
@@ -1541,16 +1525,6 @@ impl State<ServerConnectionData> for ExpectQuicTraffic {
     {
         // reject all messages
         Err(inappropriate_message(&m.payload, &[]))
-    }
-
-    fn export_keying_material(
-        &self,
-        output: &mut [u8],
-        label: &[u8],
-        context: Option<&[u8]>,
-    ) -> Result<(), Error> {
-        self.exporter
-            .export_keying_material(output, label, context)
     }
 
     fn into_owned(self: Box<Self>) -> hs::NextState<'static> {

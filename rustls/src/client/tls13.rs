@@ -15,8 +15,8 @@ use crate::client::{ClientConfig, ClientSessionStore, hs};
 use crate::common_state::{
     CommonState, HandshakeFlightTls13, HandshakeKind, KxState, Protocol, Side, State,
 };
+use crate::conn::ConnectionRandoms;
 use crate::conn::kernel::{Direction, KernelContext, KernelState};
-use crate::conn::{BytesExporter, ConnectionRandoms};
 use crate::crypto::hash::Hash;
 use crate::crypto::{ActiveKeyExchange, SharedSecret};
 use crate::enums::{
@@ -42,8 +42,8 @@ use crate::sign::{CertifiedKey, Signer};
 use crate::suites::PartiallyExtractedSecrets;
 use crate::sync::Arc;
 use crate::tls13::key_schedule::{
-    KeyScheduleEarly, KeyScheduleExporter, KeyScheduleHandshake, KeySchedulePreHandshake,
-    KeyScheduleResumption, KeyScheduleTraffic,
+    KeyScheduleEarly, KeyScheduleHandshake, KeySchedulePreHandshake, KeyScheduleResumption,
+    KeyScheduleTraffic,
 };
 use crate::tls13::{
     Tls13CipherSuite, construct_client_verify_message, construct_server_verify_message,
@@ -1454,6 +1454,7 @@ impl State<ClientConnectionData> for ExpectFinished {
             key_schedule_pre_finished.into_traffic(cx.common, st.transcript.current_hash());
         cx.common
             .start_traffic(&mut cx.sendable_plaintext);
+        cx.common.exporter = Some(Box::new(exporter));
 
         // Now that we've reached the end of the normal handshake we must enforce ECH acceptance by
         // sending an alert and returning an error (potentially with retry configs) if the server
@@ -1469,7 +1470,6 @@ impl State<ClientConnectionData> for ExpectFinished {
             suite: st.suite,
             key_schedule,
             resumption,
-            exporter,
             _cert_verified: st.cert_verified,
             _sig_verified: st.sig_verified,
             _fin_verified: fin,
@@ -1496,7 +1496,6 @@ struct ExpectTraffic {
     suite: &'static Tls13CipherSuite,
     key_schedule: KeyScheduleTraffic,
     resumption: KeyScheduleResumption,
-    exporter: KeyScheduleExporter,
     _cert_verified: verify::ServerCertVerified,
     _sig_verified: verify::HandshakeSignatureValid,
     _fin_verified: verify::FinishedMessageVerified,
@@ -1631,16 +1630,6 @@ impl State<ClientConnectionData> for ExpectTraffic {
             .request_key_update_and_update_encrypter(common)
     }
 
-    fn export_keying_material(
-        &self,
-        output: &mut [u8],
-        label: &[u8],
-        context: Option<&[u8]>,
-    ) -> Result<(), Error> {
-        self.exporter
-            .export_keying_material(output, label, context)
-    }
-
     fn into_external_state(
         self: Box<Self>,
     ) -> Result<(PartiallyExtractedSecrets, Box<dyn KernelState + 'static>), Error> {
@@ -1693,16 +1682,6 @@ impl State<ClientConnectionData> for ExpectQuicTraffic {
         self.0
             .handle_new_ticket_tls13(cx, nst)?;
         Ok(self)
-    }
-
-    fn export_keying_material(
-        &self,
-        output: &mut [u8],
-        label: &[u8],
-        context: Option<&[u8]>,
-    ) -> Result<(), Error> {
-        self.0
-            .export_keying_material(output, label, context)
     }
 
     fn into_external_state(
