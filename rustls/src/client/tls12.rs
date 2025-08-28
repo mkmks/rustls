@@ -14,8 +14,8 @@ use crate::check::{inappropriate_handshake_message, inappropriate_message};
 use crate::client::common::{ClientAuthDetails, ServerCertDetails};
 use crate::client::{ClientConfig, hs};
 use crate::common_state::{CommonState, HandshakeKind, KxState, Side, State};
-use crate::conn::ConnectionRandoms;
 use crate::conn::kernel::{Direction, KernelContext, KernelState};
+use crate::conn::{BytesExporter, ConnectionRandoms};
 use crate::crypto::KeyExchangeAlgorithm;
 use crate::enums::{AlertDescription, ContentType, HandshakeType, ProtocolVersion};
 use crate::error::{Error, InvalidMessage, PeerIncompatible, PeerMisbehaved};
@@ -1301,7 +1301,7 @@ impl State<ClientConnectionData> for ExpectFinished {
 
         Ok(Box::new(ExpectTraffic {
             extracted_secrets,
-            secrets: st.secrets,
+            exporter: st.secrets.into_exporter(),
             _cert_verified: st.cert_verified,
             _sig_verified: st.sig_verified,
             _fin_verified,
@@ -1329,7 +1329,7 @@ impl State<ClientConnectionData> for ExpectFinished {
 struct ExpectTraffic {
     // only available if `config.enable_secret_extraction` is true
     extracted_secrets: Option<Result<PartiallyExtractedSecrets, Error>>,
-    secrets: ConnectionSecrets,
+    exporter: Box<dyn BytesExporter>,
     _cert_verified: verify::ServerCertVerified,
     _sig_verified: verify::HandshakeSignatureValid,
     _fin_verified: verify::FinishedMessageVerified,
@@ -1364,9 +1364,8 @@ impl State<ClientConnectionData> for ExpectTraffic {
         label: &[u8],
         context: Option<&[u8]>,
     ) -> Result<(), Error> {
-        self.secrets
-            .export_keying_material(output, label, context);
-        Ok(())
+        self.exporter
+            .export_keying_material(output, label, context)
     }
 
     fn into_external_state(
