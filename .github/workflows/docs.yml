@@ -6,6 +6,7 @@ permissions:
 on:
   workflow_dispatch:
   pull_request:
+  release:
   push:
     branches:
       - main
@@ -43,6 +44,11 @@ jobs:
         run: cargo doc --locked --features aws-lc-rs,brotli,custom-provider,hashbrown,log,ring,std,zlib --no-deps --package rustls
         env:
           RUSTDOCFLAGS: -Dwarnings --cfg=docsrs --html-after-content tag.html
+
+      - name: Generate pages for github releases
+        run: |
+          cargo install --locked --git https://github.com/ctz/github-releases-to-markdown
+          github-releases-to-markdown --user rustls --repo rustls --output-dir website/content/release
 
       - name: Generate other pages
         run: |
